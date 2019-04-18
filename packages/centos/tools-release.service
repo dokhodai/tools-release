@@ -1,0 +1,9 @@
+[Unit]
+Description=tools release service
+
+[Service]
+Type=simple
+ExecStart=/go/bin/tools-release
+
+[Install]
+WantedBy=multi-user.target

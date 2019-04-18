@@ -88,8 +88,9 @@ pipeline {
                         }
                         steps {
                             copyArtifacts filter: 'tools-release', fingerprintArtifacts: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
-                            sh 'script to build rpm package'
-                            sh 'push to some location it can be downloaded for deployment'
+                            sh 'mv tools-release packages/centos/'
+                            sh 'sudo rpmbuild --define "_topdir $WORKSPACE" --buildroot=$WORKSPACE/packages/centos -v -bb --clean $WORKSPACE/packages/centos/tools-release.spec'
+                            sh 'push $WORKSPACE/RPMS/x86_64/tools-release-1.0.0-1.x86_64.rpm to some location it can be downloaded for deployment'
                         }
                         post {
                             failure {
