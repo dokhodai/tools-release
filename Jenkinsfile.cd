@@ -3,6 +3,30 @@ def dockerLogin() {
     sh 'docker login http://docker.private.registry -u USERID -p USERPASS'
 }
 
+def checkServer() {
+    sh """
+        echo 
+        echo "===> checking server listen on port 8080"
+        
+        counter=1
+        while [ true ]
+        do
+            if [ \$(curl -k -m 5 -s -w "%{http_code}\\n" "http://localhost:8080" -o /dev/null || true) -eq 200 ]; then
+                echo "Server is up and running....."
+                break
+            fi
+            echo "sleeping and wating for server to come up online"
+            if [ "\$counter" -eq "60" ]; then
+                echo
+                echo "keep up after waited for 10mins."
+                exit 1
+            fi
+            counter=`expr \$counter + 1`
+            sleep 10
+        done
+    """
+}
+
 pipeline {
     agent none
     environment {
@@ -21,6 +45,8 @@ pipeline {
                         script {
                             dockerLogin()
                             sh "docker run -it --rm -p 8080:8080 --name tools-release docker.private.registry/docker/tools-release:${imageVersion}"
+                            sh 'docker container ls | grep tools-releases'
+                            checkServer()
                         }
                     }
                 }    
@@ -29,7 +55,10 @@ pipeline {
                         label 'ubuntu'
                     }
                     steps {
-                        sh 'sudo apt install tools-release'
+                        script {
+                            sh 'sudo apt install tools-release'
+                            checkServer()
+                        }
                     }
                     post {
                         failure {
@@ -42,8 +71,12 @@ pipeline {
                         label 'centos'
                     }
                     steps {
-                        // sh 'rpm -Uhv tools-release-1.0.0-1.x86_64.rpm' or yum 
-                        sh 'sudo yum install tools-release'
+                        script {
+                            // sh 'rpm -Uhv tools-release-1.0.0-1.x86_64.rpm' or yum
+                            sh 'sudo yum install tools-release'
+                            sh 'rpm -qa | grep tools-release'
+                            checkServer()
+                        }
                     }
                     post {
                         failure {
