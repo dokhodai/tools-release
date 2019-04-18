@@ -1,0 +1,62 @@
+def imageVersion = "1.0.0"
+def dockerLogin() {
+    sh 'docker login http://docker.private.registry -u USERID -p USERPASS'
+}
+
+pipeline {
+    agent none
+    environment {
+    }
+    parameters {
+    }
+    stages {
+        stage('Deploy') {
+            failFast true
+            parallel {
+                stage('Docker') {
+                    agent {
+                        label 'docker'
+                    }
+                    steps {
+                        script {
+                            dockerLogin()
+                            sh "docker run -it --rm -p 8080:8080 --name tools-release docker.private.registry/docker/tools-release:${imageVersion}"
+                        }
+                    }
+                }    
+                stage('Ubuntu') {
+                    agent {
+                        label 'ubuntu'
+                    }
+                    steps {
+                        sh 'sudo apt install tools-release'
+                    }
+                    post {
+                        failure {
+                            slackSend "Ubuntu package Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                        }
+                    }
+                }
+                stage('CentOS') {
+                    agent {
+                        label 'centos'
+                    }
+                    steps {
+                        // sh 'rpm -Uhv tools-release-1.0.0-1.x86_64.rpm' or yum 
+                        sh 'sudo yum install tools-release'
+                    }
+                    post {
+                        failure {
+                            slackSend "CentOS package Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            slackSend "Deploy PASSED - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+        }
+    }
+}

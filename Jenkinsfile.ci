@@ -1,3 +1,4 @@
+def imageVersion = "1.0.0"
 def dockerLogin() {
     sh 'docker login http://docker.private.registry -u USERID -p USERPASS'
 }
@@ -5,8 +6,10 @@ def dockerLogin() {
 pipeline {
     agent none
     environment {
+        VERSION = "${imageVersion}"
     }
     parameters {
+        choice(name: 'DEPLOY', choices: 'yes\nno', description: 'Deploy?')
     }
     stages {
         stage('Run Tests') {
@@ -45,66 +48,81 @@ pipeline {
                     }
                 }
             }
-
-            stage('Build') {
-                agent {
-                    label 'build'
+        }
+        stage('Build') {
+            agent {
+                label 'build'
+            }
+            steps {
+                script {
+                    dockerLogin()
+                    sh 'make build-image'
+                    sh "docker tag tools-release-img:${imageVersion} docker.private.registry/docker/tools-release-img:${imageVersion}"
+                    sh "docker push docker.private.registry/docker/tools-release-img:${imageVersion}"
+                    archiveArtifacts artifacs: 'tools-release', fingerprint: true
                 }
-                steps {
-                    script {
-                        dockerLogin()
-                        sh 'make build-image'
-                        sh 'docker push tools-release-img' 
-                        archiveArtifacts artifacs: 'tools-release', fingerprint: true
+            }
+            post {
+                failure {
+                    slackSend "Build binary Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                }
+            }
+        }
+        stage('Packages') {
+            failFast true
+            parallel {
+                stage('Ubuntu') {
+                    agent {
+                        label 'ubuntu'
+                    }
+                    steps {
+                        copyArtifacts filter: 'tools-release', fingerprintArtifacts: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh 'script to build Ubuntu package'
+                        sh 'push to some location it can be downloaded for deployment'
+                    }
+                    post {
+                        failure {
+                            slackSend "Ubuntu package Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                        }
                     }
                 }
-                post {
-                    failure {
-                        slackSend "Build binary Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                stage('CentOS') {
+                    agent {
+                        label 'centos'
+                    }
+                    steps {
+                        copyArtifacts filter: 'tools-release', fingerprintArtifacts: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh 'mv tools-release packages/centos/'
+                        sh 'sudo rpmbuild --define "_topdir $WORKSPACE" --buildroot=$WORKSPACE/packages/centos -v -bb --clean $WORKSPACE/packages/centos/tools-release.spec'
+                        sh 'push $WORKSPACE/RPMS/x86_64/tools-release-1.0.0-1.x86_64.rpm to some location it can be downloaded for deployment'
+                    }
+                    post {
+                        failure {
+                            slackSend "CentOS package Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                        }
                     }
                 }
             }
-            stage('Packages') {
-                failFast true
-                parallel {
-                    stage('Ubuntu') {
-                        agent {
-                            label 'ubuntu'
-                        }
-                        steps {
-                            copyArtifacts filter: 'tools-release', fingerprintArtifacts: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
-                            sh 'script to build Ubuntu package'
-                            sh 'push to some location it can be downloaded for deployment'
-                        }
-                        post {
-                            failure {
-                                slackSend "Ubuntu package Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
-                            }
-                        }
-                    }
-                    stage('CentOS') {
-                        agent {
-                            label 'centos'
-                        }
-                        steps {
-                            copyArtifacts filter: 'tools-release', fingerprintArtifacts: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
-                            sh 'mv tools-release packages/centos/'
-                            sh 'sudo rpmbuild --define "_topdir $WORKSPACE" --buildroot=$WORKSPACE/packages/centos -v -bb --clean $WORKSPACE/packages/centos/tools-release.spec'
-                            sh 'push $WORKSPACE/RPMS/x86_64/tools-release-1.0.0-1.x86_64.rpm to some location it can be downloaded for deployment'
-                        }
-                        post {
-                            failure {
-                                slackSend "CentOS package Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
-                            }
-                        }
-                    }
+        }
+        stage ('Deploy') { // maybe connect the Jenkinsfile.cd here to deploy
+            agent {
+                label 'deploy'
+            }
+            when {
+                expression {
+                    return params.DEPLOY != 'no';
                 }
             }
-
+            steps {
+                script {
+                    deployStatus = build job: 'deploy-to-dev', wait: false
+                }
+            }
         }
     }
     post {
         success {
             slackSend "Build PASSED - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
         }
+    }
 }
