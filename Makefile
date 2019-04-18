@@ -6,7 +6,7 @@ IMAGE_TAG ?= $(PROJECT)-img
 all: test
 
 gobuild:
-	docker build -t $(BUILDER_TAG) .
+	docker build --target builder -t $(BUILDER_TAG) .
 
 test: gobuild
 	docker run --rm $(BUILDER_TAG) go test -v ./...
