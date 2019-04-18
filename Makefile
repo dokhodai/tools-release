@@ -11,8 +11,13 @@ gobuild:
 test: gobuild
 	docker run --rm $(BUILDER_TAG) go test -v ./...
 
-build-image:
+build-image: build-local
 	docker build -t $(IMAGE_TAG) .
+
+build-local: gobuild
+	docker create --name gobuild-local $(BUILDER_TAG)
+	docker cp gobuild-local:/go/src/tools-release/target/tools-release .
+	docker rm -f gobuild-local
 
 # static analysis
 lint: vet fmtcheck

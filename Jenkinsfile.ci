@@ -1,0 +1,109 @@
+def dockerLogin() {
+    sh 'docker login http://docker.private.registry -u USERID -p USERPASS'
+}
+
+pipeline {
+    agent none
+    environment {
+    }
+    parameters {
+    }
+    stages {
+        stage('Run Tests') {
+            fastFail true
+            parallel {
+                stage('Analysis') {
+                    agent {
+                        label 'test'
+                    }
+                    steps {
+                        script {
+                            dockerLog()
+                            sh 'make lint'
+                        }
+                    }
+                    post {
+                        failure {
+                            slackSend "Analysis Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                        }
+                    }
+                }
+                stage('go test') {
+                    agent {
+                        label 'test'
+                    }
+                    steps {
+                        script {
+                            dockerLogin()
+                            sh 'make test'
+                        }
+                    }
+                    post {
+                        failure {
+                            slackSend "go test Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                        }
+                    }
+                }
+            }
+
+            stage('Build') {
+                agent {
+                    label 'build'
+                }
+                steps {
+                    script {
+                        dockerLogin()
+                        sh 'make build-image'
+                        sh 'docker push tools-release-img' 
+                        archiveArtifacts artifacs: 'tools-release', fingerprint: true
+                    }
+                }
+                post {
+                    failure {
+                        slackSend "Build binary Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                    }
+                }
+            }
+            stage('Packages') {
+                failFast true
+                parallel {
+                    stage('Ubuntu') {
+                        agent {
+                            label 'ubuntu'
+                        }
+                        steps {
+                            copyArtifacts filter: 'tools-release', fingerprintArtifacts: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                            sh 'script to build Ubuntu package'
+                            sh 'push to some location it can be downloaded for deployment'
+                        }
+                        post {
+                            failure {
+                                slackSend "Ubuntu package Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                            }
+                        }
+                    }
+                    stage('CentOS') {
+                        agent {
+                            label 'centos'
+                        }
+                        steps {
+                            copyArtifacts filter: 'tools-release', fingerprintArtifacts: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                            sh 'script to build rpm package'
+                            sh 'push to some location it can be downloaded for deployment'
+                        }
+                        post {
+                            failure {
+                                slackSend "CentOS package Failed - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+                            }
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+    post {
+        success {
+            slackSend "Build PASSED - ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+        }
+}
